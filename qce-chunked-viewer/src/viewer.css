@@ -341,3 +341,5 @@ mark.hl {
 @media (max-width: 639px) {
   .qce-log-panes-horizontal { grid-template: repeat(2, minmax(0, 1fr)) / minmax(0, 1fr); }
 }
+
+.qce-log-export-status { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; padding: .3rem .75rem; font-size: .75rem; color: var(--muted-foreground); }

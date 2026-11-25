@@ -1,8 +1,11 @@
 import './log-core.js';
+import { recordImages, type LogImage } from './log-media';
 import type { ChunkStore, QceManifest, QceRecord } from './chunk-store';
 
 export type Decision = 'keep' | 'exclude';
-export type DraftFormat = 'txt' | 'md' | 'html';
+export type DraftFormat = 'txt' | 'md' | 'html' | 'json';
+export type DraftTemplate = 'standard' | 'langdu' | 'sealdice';
+export interface DraftExportOptions { template: DraftTemplate; includeImages: boolean; files?: File[]; fileSource?: string }
 
 export interface ReviewProgress {
   decisions: Partial<Record<number, Decision>>;
@@ -17,7 +20,7 @@ export interface PortableProject {
   title: string;
   windows: Array<{ id: string; name: string; enabled: boolean; selfUin?: string; selfUid?: string }>;
   people: Array<{ id: string; qq: string; uid: string; name: string; role: string }>;
-  messages: Array<{ personId: string; text: string; time: string; timestamp: number; sourceId: string; windowId: string; original?: { system?: boolean } }>;
+  messages: Array<{ personId: string; text: string; time: string; timestamp: number; sourceId: string; windowId: string; original?: { system?: boolean; content?: unknown } }>;
   state: {
     decisions: Array<Decision | 'pending'>;
     edits: Partial<Record<number, string>>;
@@ -30,7 +33,7 @@ export interface PortableProject {
 const core = (globalThis as typeof globalThis & {
   LogEditorCore: {
     parse(text: string, filename?: string): PortableProject;
-    output(project: PortableProject, format: DraftFormat): string;
+    output(project: PortableProject, format: DraftFormat, template?: DraftTemplate): string;
     escapeHTML(text: string): string;
   };
 }).LogEditorCore;
@@ -38,13 +41,14 @@ const core = (globalThis as typeof globalThis & {
 export const escapeReviewText = core.escapeHTML;
 export const outputDraft = core.output;
 export const parseLogProject = core.parse;
-export interface DraftEntry { key: string; index: number; source: string; exchange?: number }
+export interface DraftEntry { key: string; index: number; source: string; exchange?: number; images?: LogImage[] }
 export interface DraftInput { key: string; label: string; store: ChunkStore; progress: ReviewProgress }
 export type ReviewDraft = { project: PortableProject; entries: DraftEntry[] };
 
 interface DraftRow {
   input: DraftInput;
   index: number;
+  images: LogImage[];
   message: {
     id: string;
     time: string;
@@ -204,7 +208,7 @@ export async function makeReviewProject(title: string, inputs: DraftInput[], all
     const row = loadedRows[index - store.chunkStarts[chunk]!];
     if (!row) throw new Error(`无法读取第 ${index + 1} 条消息。`);
     const role = roleKey(row, store.manifest);
-    rows.push({ input, index, message: {
+    rows.push({ input, index, images: recordImages(row), message: {
       id: row.id, time: row.ts > 0 ? new Date(row.ts).toLocaleString('zh-CN', { hour12: false }) : row.date,
       timestamp: row.ts, sender: { uid: row.uid, uin: role.startsWith('qq:') ? role.slice(3) : undefined, name: row.name || '系统' },
       content: { text: reviewBody(row) },
@@ -247,13 +251,14 @@ export async function makeReviewProject(title: string, inputs: DraftInput[], all
     key: row.input.key,
     index: row.index,
     source: row.input.label,
+    images: row.images,
     exchange: (exchanges.get(exchangeKey(row) ?? '')?.length ?? 0) > 1 ? row.input.progress.exchanges?.[row.index] : undefined,
   })) };
 }
 
-export function saveReviewFile(title: string, extension: string, text: string): void {
-  const mime = extension === 'html' ? 'text/html' : extension === 'qcelog' ? 'application/json' : 'text/plain';
-  const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
+export function saveReviewFile(title: string, extension: string, text: string | Blob): void {
+  const mime = extension === 'html' ? 'text/html' : extension === 'qcelog' || extension === 'json' ? 'application/json' : 'text/plain';
+  const url = URL.createObjectURL(text instanceof Blob ? text : new Blob([text], { type: `${mime};charset=utf-8` }));
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = `${title.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 100)}.${extension}`;

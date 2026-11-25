@@ -1471,7 +1471,7 @@ export default function Viewer(): React.ReactElement {
         }} onUnlink={entry => {
           const recording = recordings.find(item => item.key === entry.key);
           if (recording && entry.exchange !== undefined) review.unlinkDraftExchange(recording, entry.exchange);
-        }} onExport={format => void review.showDraft(recordings, draftTitle, format)} onClose={closeDraft} />}
+        }} onExport={(format, options) => review.showDraft(recordings, draftTitle, format, options)} onClose={closeDraft} />}
       </div>
 
       <MediaPreview item={preview} onClose={() => setPreview(null)} />

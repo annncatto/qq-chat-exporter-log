@@ -1,7 +1,8 @@
 import { ChunkStore, kindOf, type QceInlineData, type QceManifest, type QceRecord } from './chunk-store';
+import { attachFolderImages, recordImages, jsonImages, type LogImage } from './log-media';
 import { emptyReview, escapeReviewText, parseLogProject, reviewBody, reviewKey, type ReviewProgress } from './log-review';
 
-type SourceMessage = Pick<QceRecord, 'uid' | 'uin' | 'name' | 'ts'> & { body: string; kind?: string; system?: boolean; self?: boolean };
+type SourceMessage = Pick<QceRecord, 'uid' | 'uin' | 'name' | 'ts'> & { body: string; kind?: string; images?: LogImage[]; system?: boolean; self?: boolean };
 
 export interface StoredRecording {
   key: string;
@@ -84,7 +85,7 @@ function importedRecording(
       return {
         id: msgId, ts, date, uid, uin, name, nameLower: name.toLowerCase(), logText: body,
         text: body.toLowerCase(), kind: message.kind || (message.system ? 'system' : 'text'),
-        html: `<div class="message-block">${dateDivider}${html}</div>`,
+        images: message.images, html: `<div class="message-block">${dateDivider}${html}</div>`,
       };
     });
     chunks[id] = rows;
@@ -116,7 +117,7 @@ function fromExport(manifest: QceManifest, rows: QceRecord[]): StoredRecording {
     const kind = kindOf(row.html);
     return {
       ts: timestamp(row.ts, ''), uid: row.uid, uin: typeof row.uin === 'string' ? row.uin : null,
-      name: row.name || '系统', body: reviewBody({ ...row, kind }), kind,
+      name: row.name || '系统', body: reviewBody({ ...row, kind }), images: recordImages({ ...row, kind }), kind,
       system: row.html.includes('role="note"'),
       self: /<div class="message self"/.test(row.html),
     };
@@ -173,7 +174,7 @@ export async function readRecording(file: File): Promise<StoredRecording[]> {
       if (person.role && person.role !== person.name) initial.roles[person.qq ? `qq:${person.qq}` : `uid:${uid}`] = person.role;
       return {
         uid, uin: person.qq || null, name: person.name, body: row.text, ts: timestamp(row.timestamp, row.time),
-        system: row.original?.system === true,
+        images: jsonImages(row.original), system: row.original?.system === true,
         self: Boolean((source.selfUin && source.selfUin === person.qq) || (source.selfUid && source.selfUid === person.uid)),
       };
     });
@@ -198,12 +199,13 @@ export async function readRecordingFolder(files: File[]): Promise<StoredRecordin
     if (value.id !== chunk.id || !Array.isArray(value.messages) || value.messages.length !== chunk.count) throw new Error('消息分块不完整。');
     rows.push(...value.messages);
   }
-  return fromExport(manifest, rows);
+  return attachFolderImages(fromExport(manifest, rows), files);
 }
 
 export function openStoredRecording(saved: StoredRecording): LogRecording {
   return { key: saved.key, label: saved.label, included: saved.included, initial: saved.initial,
-    saved, store: new ChunkStore('.', saved.data.manifest, saved.data) };
+    // An imported file's relative paths belong to its own export, never the open page.
+    saved, store: new ChunkStore('.', saved.data.manifest, saved.data, false) };
 }
 
 async function workspaceRequest<T>(key: string, write?: SavedWorkspace): Promise<T> {

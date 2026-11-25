@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import type { DraftEntry, DraftFormat, ReviewDraft } from './qce/log-review';
+import { MissingLogImages } from './qce/log-export';
+import type { DraftEntry, DraftFormat, DraftTemplate, DraftExportOptions, ReviewDraft } from './qce/log-review';
 
 type EntrySelection = {
   mode: 'link' | 'delete';
@@ -23,10 +24,31 @@ export function LogDraft({ draft, full, onOpenFull, onEdit, onLink, onUnlink, on
   onDelete: (entries: DraftEntry[]) => void;
   canUndoDelete: boolean;
   onUndoDelete: () => void;
-  onExport: (format: DraftFormat) => void;
+  onExport: (format: DraftFormat, options: DraftExportOptions) => Promise<void>;
   onClose: () => void;
 }) {
   const [role, setRole] = useState('');
+  const [template, setTemplate] = useState<DraftTemplate>(() => {
+    try { const value=localStorage.getItem('qce-log-export-template'); if(value==='langdu' || value==='sealdice')return value; } catch {}
+    return 'standard';
+  });
+  const [includeImages, setIncludeImages] = useState(() => {try {return localStorage.getItem('qce-log-export-images')!=='false';}catch{return true;}});
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const [missingSources, setMissingSources] = useState<Array<{key:string;label:string}>>([]);
+  const [folderSource, setFolderSource] = useState('');
+  const imageSource = useRef('');
+  const pendingFormat = useRef<DraftFormat>('txt');
+  const imageFolder = useRef<HTMLInputElement>(null);
+  const imageFiles = useRef<File[]>([]);
+  async function exportDocument(format: DraftFormat, files = imageFiles.current): Promise<void> {
+    if(exporting)return;
+    pendingFormat.current=format;setExporting(true);setExportError('');setMissingSources([]);
+    try {await onExport(format,{template,includeImages,files,fileSource:imageSource.current});}
+    catch(error) {setExportError(error instanceof Error?error.message:'导出失败。');if(error instanceof MissingLogImages){setMissingSources(error.sources);setFolderSource(error.sources[0]?.key ?? '');}}
+    finally {setExporting(false);}
+  }
+
   const [chapter, setChapter] = useState('');
   const [limit, setLimit] = useState(60);
   const [editing, setEditing] = useState<DraftEntry | null>(null);
@@ -267,11 +289,27 @@ export function LogDraft({ draft, full, onOpenFull, onEdit, onLink, onUnlink, on
         onClick={() => startSelection('delete')}>批量删除</Button>
       {canUndoDelete && <Button size="sm" variant="ghost" onClick={onUndoDelete}>撤销删除</Button>}
       <div className="qce-log-tool-group ml-auto">
-        <Button size="sm" variant="outline" disabled={!entries.length} onClick={() => onExport('txt')}>TXT</Button>
-        <Button size="sm" variant="outline" disabled={!entries.length} onClick={() => onExport('md')}>Markdown</Button>
-        <Button size="sm" variant="outline" disabled={!entries.length} onClick={() => onExport('html')}>HTML</Button>
+        <select aria-label="导出模板" value={template} disabled={exporting} onChange={event => {
+          const value=event.currentTarget.value as DraftTemplate;setTemplate(value);setExportError('');setMissingSources([]);
+          try {localStorage.setItem('qce-log-export-template',value);} catch {}
+        }}><option value="standard">标准</option><option value="langdu">朗读女</option><option value="sealdice">豹骰</option></select>
+        <label><input type="checkbox" aria-label="TXT/JSON 附带图片" checked={includeImages} disabled={exporting} onChange={event => {
+          setIncludeImages(event.currentTarget.checked);try {localStorage.setItem('qce-log-export-images',String(event.currentTarget.checked));}catch{}
+        }} />{template === 'sealdice' ? '附图' : 'TXT 附图'}</label>
+        <Button size="sm" variant="outline" disabled={!entries.length || exporting || editing !== null} onClick={() => void exportDocument('txt')}>TXT</Button>
+        {template === 'sealdice' && <Button size="sm" variant="outline" disabled={!entries.length || exporting || editing !== null} onClick={() => void exportDocument('json')}>JSON</Button>}
+        {template === 'standard' && <><Button size="sm" variant="outline" disabled={!entries.length || exporting || editing !== null} onClick={() => void exportDocument('md')}>Markdown</Button>
+        <Button size="sm" variant="outline" disabled={!entries.length || exporting || editing !== null} onClick={() => void exportDocument('html')}>HTML</Button></>}
       </div>
     </div>}
+    {(exportError || exporting) && <div className="qce-log-export-status" role="status">{exporting?'正在生成文件…':exportError}
+      {missingSources.length > 1 && <select aria-label="图片所属记录" value={folderSource} onChange={event=>setFolderSource(event.currentTarget.value)}>{missingSources.map(source=><option key={source.key} value={source.key}>{source.label}</option>)}</select>}
+      {missingSources.length > 0 && !exporting && <Button size="sm" variant="outline" onClick={() => imageFolder.current?.click()}>选择图片文件夹</Button>}
+    </div>}
+    <input type="file" hidden aria-label="选择图片文件夹" ref={element=>{imageFolder.current=element;element?.setAttribute('webkitdirectory','');}} onChange={event=>{
+      const files=Array.from(event.currentTarget.files ?? []);event.currentTarget.value='';
+      if(files.length){imageFiles.current=files;imageSource.current=folderSource;void exportDocument(pendingFormat.current,files);}
+    }} />
   </>;
 
   return full ? <dialog ref={dialog} className="qce-log-draft-full" aria-label="完整成稿" onCancel={event => {

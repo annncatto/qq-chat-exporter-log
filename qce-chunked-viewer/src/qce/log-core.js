@@ -633,10 +633,33 @@
           "'": "&#39;",
         })[c],
     );
-  function output(project, format = "txt") {
+  function output(project, format = "txt", template = "standard") {
+    if (format === "json" && template !== "sealdice") throw new Error("JSON 使用豹骰模板。");
+    if (!["standard", "langdu", "sealdice"].includes(template)) throw new Error("不支持的导出模板。");
+    if (template !== "standard" && format !== "txt" && !(template === "sealdice" && format === "json")) throw new Error("此模板使用 TXT 格式。");
+    const open = template === "langdu" ? "[" : "【", close = template === "langdu" ? "]" : "】";
     const kept = indices(project, { type: "draft" }).map(
       (i) => project.messages[i],
     );
+    if (template === "sealdice") {
+      const people = new Map(project.people.map(person => [person.id, person]));
+      if (format === "json") return JSON.stringify({version: 1, name: project.title, items: kept.map((message,index) => {
+        const person=people.get(message.personId), timestamp=timeValue(message);
+        return {id:index+1,nickname:person.role,IMUserId:person.qq ? "QQ:"+person.qq : "UID:"+(person.uid || person.id),
+          time:timestamp === null ? 0 : Math.floor(timestamp/1000), message:body(project,message.id),isDice:false,commandId:0};
+      })},null,2);
+      const pad = n => String(n).padStart(2, "0");
+      return kept.map(message => {
+        const person = people.get(message.personId);
+        const account = person.qq || "uid:" + encodeURIComponent(person.uid || person.id).replace(/[()]/g, c => "%" + c.charCodeAt(0).toString(16));
+        const name = person.role.replace(/[\r\n<>]/g, c => c === "<" ? "＜" : c === ">" ? "＞" : " ");
+        const value = timeValue(message), date = value === null ? null : new Date(value);
+        const time = date && Number.isFinite(date.getTime())
+          ? `${date.getFullYear()}/${pad(date.getMonth()+1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+          : /^\d{2}:\d{2}:\d{2}$/.test(message.time) ? message.time : "";
+        return `${time}<${name}(${account})>:${body(project,message.id)}\n`;
+      }).join("\n");
+    }
     let previous = null;
     if (format === "html") {
       const nav = groups(project)
@@ -704,18 +727,18 @@
       const round = project.state.rounds[message.id] || "";
       if (round !== previous && (round || previous))
         lines.push(
-          (format === "md" ? "**" : "【") +
+          (format === "md" ? "**" : open) +
             (format === "md"
               ? escapeMD(round || "未归类")
               : round || "未归类") +
-            (format === "md" ? "**" : "】"),
+            (format === "md" ? "**" : close),
           "",
         );
       previous = round;
       lines.push(
         format === "md"
           ? "**【" + escapeMD(role(project, message)) + "】**  "
-          : "【" + role(project, message) + "】",
+          : open + role(project, message) + close,
         format === "md"
           ? escapeMD(body(project, message.id))
           : body(project, message.id),

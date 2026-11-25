@@ -2,11 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PointerEvent, RefObject } from 'react';
 import type { FilteredDataSource, HyperScroll } from './hyperscroll';
 import type { ChunkStore, QceManifest, QceRecord } from './qce/chunk-store';
+import { buildLogExport } from './qce/log-export';
 import type { LogRecording } from './qce/log-workspace';
 import {
-  emptyReview, loadReviewRecord, makeReviewProject, outputDraft, renderLogRow,
+  emptyReview, loadReviewRecord, makeReviewProject, renderLogRow,
   progressBackup, readProgressBackup, restoreReview, reviewBody, reviewKey, saveReviewFile,
-  type Decision, type DraftEntry, type DraftFormat, type ReviewDraft, type ReviewProgress,
+  type Decision, type DraftEntry, type DraftFormat, type DraftExportOptions, type ReviewDraft, type ReviewProgress,
 } from './qce/log-review';
 
 type DragState = { id: number; index: number; x: number; y: number; started: boolean; end?: number };
@@ -402,17 +403,19 @@ export function useLogReview(target: RefObject<ReviewTarget>) {
     return () => { cancelled = true; };
   }
 
-  async function showDraft(recordings: LogRecording[], title: string, format?: DraftFormat): Promise<void> {
+  async function showDraft(recordings: LogRecording[], title: string, format?: DraftFormat, options?: DraftExportOptions): Promise<void> {
     if (busy || !target.current.store.current) return;
     setBusy(true);
     setStatus(format ? '正在生成文件…' : '正在生成成稿…');
     try {
       const result = await buildDraft(recordings, title, !format);
       if (format) {
-        saveReviewFile(title, format, outputDraft(result.project, format));
+        const exported = await buildLogExport(result, recordings, format, options);
+        saveReviewFile(title, exported.extension, exported.blob);
       } else setDraft(result);
       setStatus('');
     } catch (error) {
+      if (format) { setStatus(''); throw error; }
       setStatus(error instanceof Error ? error.message : '无法生成成稿。');
     } finally {
       setBusy(false);

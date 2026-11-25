@@ -317,3 +317,31 @@ test("editing the manuscript preserves source text, review decisions and cursor"
   assert.throws(() => C.editKept(p, 1, "不应确认"), /已保留/);
   assert.throws(() => C.editKept(p, 0, ""), /不能为空/);
 });
+
+test('朗读女 changes role tags without replacing brackets in the actual sentences', () => {
+  const p=parse([row(0,'10001','u_1','KP','读到【线索】，再看[提示]。')]);C.decide(p,0,'keep');
+  const before=C.packed(p);assert.match(C.output(p,'txt','langdu'),/\[KP\]\n读到【线索】，再看\[提示\]。/);
+  assert.equal(C.packed(p),before);assert.match(C.output(p),/【KP】\n/);
+});
+test('豹骰 preserves accounts, edited multiline text and only retained messages', () => {
+  const p=parse([row(0,'10001','u_1','KP','原文'),row(1,'10002','u_2','玩家(侦探)','原文二'),row(2,'10003','u_3','不保留','排除正文')]);
+  C.decide(p,0,'keep','修订\n续行');C.decide(p,1,'keep');C.decide(p,2,'exclude');C.assign(p,[0,1],'第一回合');
+  const text=C.output(p,'txt','sealdice');
+  assert.match(text,/2026\/11\/19 20:00:00<KP\(10001\)>:修订\n续行/);
+  assert.match(text,/<玩家\(侦探\)\(10002\)>:原文二/);
+  assert.doesNotMatch(text,/排除正文|【KP】|第一回合/);
+});
+test('豹骰 keeps UID-only speakers distinct and does not invent an unknown date', () => {
+  const p=parse([row(0,'','u_one','同名','甲'),row(1,'','u_two','同名','乙')]);
+  for(const m of p.messages){m.time='';m.timestamp=0;C.decide(p,m.id,'keep');}
+  const text=C.output(p,'txt','sealdice');assert.match(text,/<同名\(uid:u_one\)>:甲/);assert.match(text,/<同名\(uid:u_two\)>:乙/);assert.doesNotMatch(text,/1970|2026/);
+  assert.throws(()=>C.output(p,'html','sealdice'),/TXT/);
+});
+
+test('豹骰 native JSON preserves role and account identity without parsing message-like header text', () => {
+  const p=parse([row(0,'10001','u_1','KP','休息 20:00:00\n<引用>: 保留原样'),row(1,'10002','u_2','同名','第二句')]);
+  for(let i=0;i<2;i++)C.decide(p,i,'keep');
+  const data=JSON.parse(C.output(p,'json','sealdice'));
+  assert.equal(data.version,1);assert.deepEqual(data.items.map(item=>item.IMUserId),['QQ:10001','QQ:10002']);
+  assert.equal(data.items[0].message,'休息 20:00:00\n<引用>: 保留原样');assert.equal(data.items[0].isDice,false);assert.ok(data.items[0].time>0);
+});

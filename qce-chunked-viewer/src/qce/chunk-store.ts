@@ -5,6 +5,7 @@
  */
 import { BloomFilter, type BloomHashPair } from './bloom.js';
 import { kindOf } from './message-kind.mjs';
+import { imagePath, type LogImage } from './log-media';
 
 export interface QceRecord {
   id: string;
@@ -17,6 +18,7 @@ export interface QceRecord {
   text: string;
   textTruncated?: boolean;
   logText?: string;
+  images?: LogImage[];
   /** Derived message kind (not part of the export format). */
   kind: string;
   html: string;
@@ -82,6 +84,7 @@ export interface QceInlineData {
   manifest?: QceManifest;
   chunks: Record<string, QceRecord[]>;
   msgid: Record<number, Array<[string, string]>>;
+  assets?: Record<string, Blob>;
 }
 
 declare global {
@@ -136,6 +139,7 @@ export class ChunkStore {
 
   private readonly baseUrl: string;
   private readonly cache = new Map<number, QceRecord[]>();
+  private readonly imageFiles = new Map<string, Blob>();
   private readonly pending = new Map<number, Promise<QceRecord[]>>();
   private readonly resolvers = new Map<string, (c: QceChunkPayload) => void>();
   private readonly wanted = new Map<number, number>();
@@ -144,7 +148,24 @@ export class ChunkStore {
   private readonly pendingBuckets = new Map<number, Promise<Map<string, string>>>();
   private readonly bucketResolvers = new Map<number, (pairs: Array<[string, string]>) => void>();
 
-  constructor(baseUrl: string, manifest: QceManifest, private readonly inline = window.__QCE_INLINE__) {
+  imageUrl(source: string): string {
+    if (!this.resolveRelativeImages && !/^[a-z][a-z\d+.-]*:/i.test(source)) throw new Error('需要原图片文件。');
+    return new URL(source, new URL(this.baseUrl.replace(/\/?$/, '/'), document.baseURI)).href;
+  }
+
+  imageFile(source: string): Blob | undefined {
+    const path = imagePath(source);
+    const saved = path && Object.prototype.hasOwnProperty.call(this.inline?.assets ?? {}, path) ? this.inline?.assets?.[path] : undefined;
+    return saved instanceof Blob ? saved : this.imageFiles.get(source);
+  }
+
+  rememberImage(source: string, file: Blob): void {
+    this.imageFiles.delete(source);
+    this.imageFiles.set(source, file);
+    while (this.imageFiles.size > 4096) this.imageFiles.delete(this.imageFiles.keys().next().value!);
+  }
+
+  constructor(baseUrl: string, manifest: QceManifest, private readonly inline = window.__QCE_INLINE__, private readonly resolveRelativeImages = true) {
     this.baseUrl = baseUrl;
     this.manifest = manifest;
     this.chunkStarts = [];
